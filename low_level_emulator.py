@@ -198,7 +198,7 @@ def parse_commands(filepath):
                 elapsed_ms   = int(parts[0])
                 cmd_type = int(parts[1])
                 hand       = int(parts[2])
-                data       = int(parts[3])
+                data       = int(parts[3], 2) if cmd_type == 1 else int(parts[3])
                 commands.append((cmd_type, elapsed_ms, hand, data))
             except ValueError:
                 continue
