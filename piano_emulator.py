@@ -178,7 +178,7 @@ def parse_commands(filepath):
             cmd_type = int(raw_parts[0])
             if cmd_type == 0:
                 # Play note: type hand fingers base_key duration
-                hand = int(raw_parts[1]) ^ 1  # file: 0=left→internal 1, 1=right→internal 0
+                hand = int(raw_parts[1])  # file: 0=left, 1=right
                 # Finger byte: accept 6-bit binary string (e.g. "111111") or decimal
                 finger_str = raw_parts[2]
                 if all(c in '01' for c in finger_str) and len(finger_str) == 6:
@@ -198,25 +198,42 @@ def parse_commands(filepath):
 
 IS_BLACK = [False, True, False, True, False, False, True, False, True, False, True, False]
 
-# ── Finger spacing (in semitones) ─────────────────────────────────────────────
-# Change these to adjust each hand's physical finger spacing.
-# 1 = half step, 2 = whole step, etc.
-RH_FINGER_SPACING = 1  # right hand (file value 1): half step between each finger
-LH_FINGER_SPACING = 1  # left hand  (file value 0): half step between each finger (change as needed)
+# ── Finger spacing (cumulative semitone offsets from finger 1) ────────────────
+# RH: all fingers a half step apart → offsets 0,1,2,3,4,5
+# LH: half, whole, half, whole, half between consecutive fingers
+#     f1→f2 = 1, f2→f3 = 2, f3→f4 = 1, f4→f5 = 2, f5→f6 = 1
+#     cumulative offsets from f1: 0, 1, 3, 4, 6, 7
+RH_FINGER_OFFSETS = [0, 1, 2, 3, 4, 5]
+LH_FINGER_OFFSETS = [0, 1, 3, 4, 6, 7]
 
 def fingers_to_keys(base_key, finger_byte, hand):
     """
     finger_byte is a 6-bit number. Bit 5 (MSB) = finger 1 (leftmost).
-    base_key is where finger 1 sits. Fingers spread rightward by the hand's spacing.
-    hand: 0 = left (LH_FINGER_SPACING), 1 = right (RH_FINGER_SPACING).
+    base_key is the key where the leftmost *active* finger sits.
+    If no fingers are active, base_key is treated as finger 1's position.
+    hand: 0 = left (LH_FINGER_OFFSETS), 1 = right (RH_FINGER_OFFSETS).
     """
-    step = LH_FINGER_SPACING if hand == 0 else RH_FINGER_SPACING
+    offsets = LH_FINGER_OFFSETS if hand == 0 else RH_FINGER_OFFSETS
+
+    # Find which finger is the leftmost active one (highest bit = finger 1)
+    leftmost_active_f = None
+    for f in range(6):
+        bit = 5 - f
+        if finger_byte & (1 << bit):
+            leftmost_active_f = f
+            break
+
+    # Shift so that leftmost active finger lands on base_key.
+    # If no finger is active, finger 1 sits at base_key (offset 0).
+    anchor_offset = offsets[leftmost_active_f] if leftmost_active_f is not None else 0
+    finger1_key = base_key - anchor_offset
+
     active_keys = []
     all_keys = []
     for f in range(6):
-        k = base_key + f * step
+        k = finger1_key + offsets[f]
         all_keys.append(k if 0 <= k < NUM_KEYS else None)
-        bit = 5 - f  # bit5 = finger1 (leftmost)
+        bit = 5 - f
         if 0 <= k < NUM_KEYS and (finger_byte & (1 << bit)):
             active_keys.append(k)
     return active_keys, all_keys
@@ -400,7 +417,7 @@ class PianoEmulator:
             hand_str = "LEFT" if hand == 0 else "RIGHT"
             dur_names = {1:"whole", 2:"half", 4:"quarter", 8:"eighth", 16:"sixteenth"}
             dur_name = dur_names.get(dur_val, str(dur_val))
-            spacing = f"{LH_FINGER_SPACING} semitone(s)" if hand == 0 else f"{RH_FINGER_SPACING} semitone(s)"
+            spacing = f"LH offsets {LH_FINGER_OFFSETS}" if hand == 0 else f"RH offsets {RH_FINGER_OFFSETS}"
             self.current_cmd_display = (f"{hand_str} hand | fingers={bin(fingers)[2:].zfill(6)} "
                                         f"| base={base_key} | {dur_name} | {spacing}")
 
